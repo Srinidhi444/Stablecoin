@@ -62,7 +62,11 @@ contract DSCEngine is ReentrancyGuard {
 
     // ========================= CORE FUNCTIONS =========================
 
-    function depositCollateralAndMintDsc() external {}
+    function depositCollateralAndMintDsc(address tokenCollateralAddress,
+        uint256 amountCollateral,uint256 amountDscToMint) external {
+        depositCollateral(tokenCollateralAddress,amountCollateral);
+        mintDsc(amountDscToMint);
+        }
 
     /**
      * @param tokenCollateralAddress address of collateral token
@@ -72,7 +76,7 @@ contract DSCEngine is ReentrancyGuard {
         address tokenCollateralAddress,
         uint256 amountCollateral
     )
-        external
+        public
         moreThanZero(amountCollateral)
         isAllowedToken(tokenCollateralAddress)
         nonReentrant
@@ -94,7 +98,7 @@ contract DSCEngine is ReentrancyGuard {
     * @param amountDscToMint amount of DSC to 
     *@notice they must have more collateral than the minimum threshold factor after minting
      */
-    function mintDsc(uint256 amountDscToMint) external moreThanZero(amountDscToMint) nonReentrant() {
+    function mintDsc(uint256 amountDscToMint) public moreThanZero(amountDscToMint) nonReentrant() {
         s_dscMinted[msg.sender] += amountDscToMint;
         _revertIfHealthFactorIsBroken(msg.sender);
         bool minted = i_dsc.mint(msg.sender, amountDscToMint);
