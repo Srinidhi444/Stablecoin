@@ -131,7 +131,7 @@ contract DSCEngine is ReentrancyGuard {
             revert DSCEngine__HealthFactorOk();
         }
         // how much collateral to give the liquidator for covering the debtToCover
-        uint256 tokenAmountFromDebtCovered=getTokenAmountfromusd(collateral,debtToCover);
+        uint256 tokenAmountFromDebtCovered=getTokenAmountFromUsd(collateral,debtToCover);
         uint256 bonusCollateral= (tokenAmountFromDebtCovered*LIQUIDATION_BONUS)/100;
         uint256 totalCollateralToGive=tokenAmountFromDebtCovered+bonusCollateral;
         _reedeemCollateral(collateral,totalCollateralToGive,user,msg.sender);
@@ -186,7 +186,7 @@ contract DSCEngine is ReentrancyGuard {
         return (uint256(rawPrice)*1e10)*amount/1e18; // Adjusting price to 18 decimals and multiplying by amount
 
     }
-    function getTokenAmountfromusd(address token,uint256 usdAmount) public view returns(uint256 tokenAmount){
+    function getTokenAmountFromUsd(address token,uint256 usdAmount) public view returns(uint256 tokenAmount){
         AggregatorV3Interface priceFeed=AggregatorV3Interface(s_priceFeeds[token]);
         (,int256 rawPrice,,,) = priceFeed.latestRoundData();
         uint256 tokenPriceInUsd=(uint256(rawPrice)*1e10);
@@ -210,4 +210,7 @@ contract DSCEngine is ReentrancyGuard {
         }
         i_dsc.burn(amount);
     } 
+    function getAccountBalance(address user) external view returns(uint256 dscMinted,uint256 collateralValueInUsd){
+        (dscMinted,collateralValueInUsd)=_getAccountInformation(user);
+    }
 }
