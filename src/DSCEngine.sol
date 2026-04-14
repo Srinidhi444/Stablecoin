@@ -19,8 +19,11 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TransferFailed();
     error DSCEngine_BreaksHealthFactor();
     error DSCEngine__HealthFactorOk();
+    error DSCEngine__StalePrice();
+    error DSCEngine__InvalidPrice();
     // State Variables
     uint256 private constant LIQUIDATION_THRESHOLD=50;
+    uint256 private constant PRICE_FEED_TIMEOUT=3 hours;
     mapping(address => address) private s_priceFeeds; // token -> price feed
     mapping(address user => mapping(address token=>uint256 amount)) private s_collateralDeposited;
     mapping(address user=>uint256 amountDscMinted) private s_dscMinted;
@@ -91,8 +94,13 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
-    function redeemCollateralForDsc(address tokenCollateralAddress,uint256 amountCollateral,uint256 amountDsc) external {
-        burnDsc(amountDsc);
+    function redeemCollateralForDsc(address tokenCollateralAddress,uint256 amountCollateral,uint256 amountDsc)
+        external
+        moreThanZero(amountCollateral)
+        moreThanZero(amountDsc)
+        nonReentrant
+    {
+        _burnDsc(amountDsc,msg.sender,msg.sender);
         _reedeemCollateral(tokenCollateralAddress,amountCollateral,msg.sender,msg.sender);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
@@ -120,12 +128,10 @@ contract DSCEngine is ReentrancyGuard {
 
 
     function burnDsc(uint256 amount) public moreThanZero(amount) nonReentrant() {
-       _burnDsc(amount,msg.sender,msg.sender);
-        _revertIfHealthFactorIsBroken(msg.sender);
-        
+        _burnDsc(amount,msg.sender,msg.sender);
     }
     // if someone is about undercollateralized,we will pay you to liquidate them
-    function liquidate(address collateral,address user,uint256 debtToCover) external {
+    function liquidate(address collateral,address user,uint256 debtToCover) external moreThanZero(debtToCover) nonReentrant {
         uint256 startingHealthFactor=_healthFactor(user);
         if (startingHealthFactor >= 1e18) {
             revert DSCEngine__HealthFactorOk();
@@ -137,7 +143,7 @@ contract DSCEngine is ReentrancyGuard {
         _reedeemCollateral(collateral,totalCollateralToGive,user,msg.sender);
        _burnDsc(debtToCover,user , msg.sender);
         uint256 endingHealthFactor=_healthFactor(user);
-        if (endingHealthFactor <= startingHealthFactor || endingHealthFactor < 1e18) {
+        if (endingHealthFactor < 1e18) {
             revert DSCEngine_BreaksHealthFactor();
         }
         _revertIfHealthFactorIsBroken(msg.sender);
@@ -182,16 +188,21 @@ contract DSCEngine is ReentrancyGuard {
     }
     function getPrice(address token,uint256 amount) public view returns (uint256 price) {
         AggregatorV3Interface priceFeed=AggregatorV3Interface(s_priceFeeds[token]);
-        (,int256 rawPrice,,,) = priceFeed.latestRoundData();
-        return (uint256(rawPrice)*1e10)*amount/1e18; // Adjusting price to 18 decimals and multiplying by amount
-
+        (uint80 roundId, int256 rawPrice,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+        if (rawPrice <= 0) revert DSCEngine__InvalidPrice();
+        if (updatedAt == 0 || answeredInRound < roundId) revert DSCEngine__StalePrice();
+        if (block.timestamp - updatedAt > PRICE_FEED_TIMEOUT) revert DSCEngine__StalePrice();
+        return (uint256(rawPrice)*1e10)*amount/1e18;
     }
+
     function getTokenAmountFromUsd(address token,uint256 usdAmount) public view returns(uint256 tokenAmount){
         AggregatorV3Interface priceFeed=AggregatorV3Interface(s_priceFeeds[token]);
-        (,int256 rawPrice,,,) = priceFeed.latestRoundData();
+        (uint80 roundId, int256 rawPrice,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+        if (rawPrice <= 0) revert DSCEngine__InvalidPrice();
+        if (updatedAt == 0 || answeredInRound < roundId) revert DSCEngine__StalePrice();
+        if (block.timestamp - updatedAt > PRICE_FEED_TIMEOUT) revert DSCEngine__StalePrice();
         uint256 tokenPriceInUsd=(uint256(rawPrice)*1e10);
-        tokenAmount=(usdAmount*1e18)/tokenPriceInUsd; // Adjusting for decimals
-
+        tokenAmount=(usdAmount*1e18)/tokenPriceInUsd;
     }
     function _reedeemCollateral(address tokenCollatralAddress,uint256 amount,address from,address to) private{
         s_collateralDeposited[from][tokenCollatralAddress] -= amount;
